@@ -39,9 +39,6 @@ def ReplaceParameters(model):
     print('replace parameter')
     return model
 
-
-
-
 class Agent:
     def __init__(self,fixedParameters):   
         self.fixedParameters = fixedParameters
@@ -130,7 +127,6 @@ class BuildActorModel ():
                 tf.add_to_collection('nextstates_', nextstates_)
                 tf.add_to_collection("actionGradients_", actionGradients_)
 
-                
             with tf.name_scope("trainingParams"):
                 learningRate_ = tf.constant(0, dtype=tf.float32)
                 tau_ = tf.constant(0, dtype=tf.float32)
@@ -174,8 +170,8 @@ class BuildActorModel ():
                 tf.add_to_collection("policyGradient_", policyGradient_)
                 
             with tf.variable_scope('train'):
-                optimizer = tf.train.AdamOptimizer(-learningRate_, name='adamOptimizer')
-                trainOpt_ = optimizer.apply_gradients(zip(policyGradient_, evalParams_))
+                trainOpt_ = tf.train.AdamOptimizer(-learningRate_, name='adamOptimizer').\
+                           apply_gradients(zip(policyGradient_, evalParams_))
                 tf.add_to_collection("trainOpt_", trainOpt_)
                 
             fullSummary = tf.summary.merge_all()
@@ -372,7 +368,7 @@ class TrainActor:
         
         trainOpt_ = actorGraph.get_collection_ref("trainOpt_")[0]
         Qevalvalue_ = actorGraph.get_collection_ref("Qevalvalue_")[0]
-        Qevalvalue_, trainOpt = actorModel.run([Qevalvalue_,trainOpt_], feed_dict={states_: statebatch,actionGradients_: actionGradients,
+        actorModel.run([trainOpt_], feed_dict={states_: statebatch,actionGradients_: actionGradients,
                                                         learningRate_: self.actorLearningRate})
         self.actorWriter.flush()
         return actorModel
@@ -418,8 +414,8 @@ class GetNoise():
         if runtime > self.noiseDacayStep:
             self.initnoisevar = self.initnoisevar-self.noiseDecay if self.initnoisevar > self.minVar else self.minVar 
         noise = np.random.normal(0, self.initnoisevar)
-        if runtime % 1000 == 0:
-            print('noise Variance', self.initnoisevar)
+        if runtime % 10000 == 0:
+            print('noisevar', self.initnoisevar)
         return noise
 
 
