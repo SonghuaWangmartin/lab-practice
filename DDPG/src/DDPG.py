@@ -204,13 +204,13 @@ class BuildCriticModel ():
                 action_ = tf.stop_gradient(tf.placeholder(tf.float32, [None, self.actionDim]))
                 nextstates_ = tf.placeholder(tf.float32, [None, self.stateDim])
                 reward_ = tf.placeholder(tf.float32, [None, 1], 'reward_')
-                actiontarget = tf.placeholder(tf.float32, [None, self.actionDim])
+                targetaction = tf.placeholder(tf.float32, [None, self.actionDim])
                 Qtarget_ = tf.placeholder(tf.float32, [None, 1], name="Qtarget_")
                 tf.add_to_collection('states_', states_)
                 tf.add_to_collection('nextstates_', nextstates_)
                 tf.add_to_collection("reward_", reward_)
                 tf.add_to_collection("action_", action_)
-                tf.add_to_collection("actiontarget", actiontarget)
+                tf.add_to_collection("targetaction", targetaction)
                 tf.add_to_collection("Qtarget_", Qtarget_)
                 
             with tf.name_scope("trainingParams"):
@@ -240,7 +240,7 @@ class BuildCriticModel ():
                 targetstateweight_ = tf.get_variable('targetstateweight_', [self.stateDim, numberlayers])
                 targetactionweight_ = tf.get_variable('targetactionweight_', [self.actionDim, numberlayers])
                 targetbias1 = tf.get_variable(name='targetbias1', shape=[numberlayers], initializer=self.initbias)
-                targetactivation = tf.nn.relu(tf.matmul(nextstates_, targetstateweight_) + tf.matmul(actiontarget, targetactionweight_) + targetbias1)
+                targetactivation = tf.nn.relu(tf.matmul(nextstates_, targetstateweight_) + tf.matmul(targetaction, targetactionweight_) + targetbias1)
                 targetactivation = tf.layers.batch_normalization(targetactivation)
                 Qnextvalue_ = tf.layers.dense(targetactivation,1, kernel_initializer=self.initweight, bias_initializer=self.initbias, trainable = False)
                 
@@ -264,16 +264,10 @@ class BuildCriticModel ():
             with tf.name_scope("actionGradients"):
                 actionGradients_ = tf.gradients(Qevalvalue_, action_)[0]
                 tf.add_to_collection("actionGradients_", actionGradients_)
-                
-            with tf.name_scope("output"):
-                evalQ_ = tf.multiply(Qevalvalue_, 1, name='evalQ_')
-                targetQ_ = tf.multiply(Qnextvalue_, 1, name='targetQ_')
-                tf.add_to_collection("evalQ_", evalQ_)
-                tf.add_to_collection("targetQ_", targetQ_)
             
             with tf.name_scope("loss"):
                 yi_ = reward_ + gamma_ * Qtarget_
-                loss_ = tf.losses.mean_squared_error(labels=yi_, predictions=evalQ_)
+                loss_ = tf.losses.mean_squared_error(labels=yi_, predictions=tf.multiply(Qevalvalue_, 1))
                 tf.add_to_collection("loss_", loss_)
             
             with tf.variable_scope('train'):
@@ -311,8 +305,8 @@ def getQtarget(nextStatesBatch, targetactionsBatch, criticModel):
     modelgraph = criticModel.graph
     Qnextvalue_ = modelgraph.get_collection_ref('Qnextvalue_')[0]
     nextstates_ = modelgraph.get_collection_ref("nextstates_")[0]
-    actionTarget_ = modelgraph.get_collection_ref("actiontarget")[0]
-    Qtargetvalue_ = criticModel.run(Qnextvalue_, feed_dict={nextstates_: nextStatesBatch,actionTarget_: targetactionsBatch})
+    targetaction_ = modelgraph.get_collection_ref("targetaction")[0]
+    Qtargetvalue_ = criticModel.run(Qnextvalue_, feed_dict={nextstates_: nextStatesBatch,targetaction_: targetactionsBatch})
     return Qtargetvalue_
 
 def getQeval(StatesBatch, actionsBatch, criticModel):
