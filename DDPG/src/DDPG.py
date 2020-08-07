@@ -41,6 +41,7 @@ def ReplaceParameters(model):
 
 
 
+
 class Agent:
     def __init__(self,fixedParameters):   
         self.fixedParameters = fixedParameters
@@ -225,7 +226,6 @@ class BuildCriticModel ():
                 evalactionweight_ = tf.get_variable('evalactionweight_', [self.actionDim, numberlayers])
                 evalbias1 = tf.get_variable(name='evalbias1', shape=[numberlayers], initializer=self.initbias)
                 evalactivation = tf.nn.relu(tf.matmul(states_, evalstateweight_) + tf.matmul(action_, evalactionweight_) + evalbias1)
-                evalactivation = tf.layers.batch_normalization(evalactivation)
                 Qevalvalue_ = tf.layers.dense(evalactivation,1, kernel_initializer=self.initweight, bias_initializer=self.initbias,  trainable = True)
 
                 tf.add_to_collection('evalstateweight_', evalstateweight_) 
@@ -239,7 +239,6 @@ class BuildCriticModel ():
                 targetactionweight_ = tf.get_variable('targetactionweight_', [self.actionDim, numberlayers])
                 targetbias1 = tf.get_variable(name='targetbias1', shape=[numberlayers], initializer=self.initbias)
                 targetactivation = tf.nn.relu(tf.matmul(nextstates_, targetstateweight_) + tf.matmul(action_, targetactionweight_) + targetbias1)
-                targetactivation = tf.layers.batch_normalization(targetactivation)
                 Qnextvalue_ = tf.layers.dense(targetactivation,1, kernel_initializer=self.initweight, bias_initializer=self.initbias, trainable = False)
                 
                 tf.add_to_collection('targetstateweight_', targetstateweight_) 
@@ -306,14 +305,6 @@ def getQtarget(nextStatesBatch, targetactionsBatch, criticModel):
     action_ = modelgraph.get_collection_ref("action_")[0]
     Qtargetvalue_ = criticModel.run(Qnextvalue_, feed_dict={nextstates_: nextStatesBatch,action_: targetactionsBatch})
     return Qtargetvalue_
-
-def getQeval(StatesBatch, actionsBatch, criticModel):
-    modelgraph = criticModel.graph
-    Qevalvalue_ = modelgraph.get_collection_ref('Qevalvalue_')[0]
-    states_ = modelgraph.get_collection_ref("states_")[0]
-    action_ = modelgraph.get_collection_ref("action_")[0]
-    Qevalvalue_ = criticModel.run(Qevalvalue_, feed_dict={states_: StatesBatch,action_: actionsBatch})
-    return Qevalvalue_
 
 def getActionGradients(criticModel, stateBatch, actionsBatch):
     criticGraph = criticModel.graph
