@@ -58,20 +58,21 @@ class MartinDDPG:
         trajectory = []
         totalreward = []
         totalrewards = []
+        episodereward = []
         replaybuffer = deque(maxlen=int(self.fixedParameters['bufferSize']))
         buildActorModel = BuildActorModel(stateDim, actionDim,actionBound ,
                                           self.fixedParameters['actorHiddenLayersWeightInit'],self.fixedParameters['actorHiddenLayersBiasInit'],
                                           self.fixedParameters['actorOutputWeightInit'], self.fixedParameters['actorOutputBiasInit'],self.fixedParameters['actorActivFunction'],self.fixedParameters['gradNormClipValue'],self.fixedParameters['normalizeEnv'])
-        actorWriter, actorModel = buildActorModel(self.fixedParameters['actorHiddenLayersWidths'])
+        actorModel = buildActorModel(self.fixedParameters['actorHiddenLayersWidths'])
         
         buildCriticModel = BuildCriticModel(stateDim, actionDim,
                                             self.fixedParameters['criticHiddenLayersWeightInit'],self.fixedParameters['criticHiddenLayersBiasInit'],
                                             self.fixedParameters['criticOutputWeightInit'], self.fixedParameters['criticOutputBiasInit'],
                                             self.fixedParameters['criticActivFunction'],self.fixedParameters['gradNormClipValue'],self.fixedParameters['normalizeEnv'])
-        criticWriter, criticModel = buildCriticModel(self.fixedParameters['criticHiddenLayersWidths'])
+        criticModel = buildCriticModel(self.fixedParameters['criticHiddenLayersWidths'])
         
-        trainCritic = TrainCritic(self.fixedParameters['criticLR'], self.fixedParameters['gamma'], criticWriter)
-        trainActor = TrainActor(self.fixedParameters['actorLR'], actorWriter)
+        trainCritic = TrainCritic(self.fixedParameters['criticLR'], self.fixedParameters['gamma'])
+        trainActor = TrainActor(self.fixedParameters['actorLR'])
         updateParameters = UpdateParameters(self.fixedParameters['tau'])
         trainddpgModels = TrainDDPGModels(updateParameters, trainActor, trainCritic, actorModel,criticModel)
     
@@ -100,11 +101,12 @@ class MartinDDPG:
                     totalrewards.append(rewards)
                     totalreward.append(rewards)
                     print('episode: ',episode,'reward:',rewards,'runstep',self.runstep)
+            episodereward.append(np.mean(totalrewards))
+            print('epireward',np.mean(totalrewards))
             if episode % 100 == 0:
                 meanreward.append(np.mean(totalreward))
                 print('episode: ',episode,'meanreward:',np.mean(totalreward))
-                self.totalreward = []
-
+                totalreward = []
         with actorModel.as_default():
             saveVariables(actorModel, self.fixedParameters['modelSavePathMartin'])
         with criticModel.as_default():
@@ -219,9 +221,7 @@ class BuildActorModel ():
             model = tf.Session(graph = graph)
             model.run(tf.global_variables_initializer())
             
-            actorWriter = tf.summary.FileWriter('/path/to/logs', graph = graph)
-            tf.add_to_collection("actorWriter", actorWriter)
-        return actorWriter, model
+        return model
 
 class BuildCriticModel ():
     def __init__(self, statedim, actiondim,criticHiddenLayersInitinitweight,criticHiddenLayersinitbias,criticOutputInitinitweight,criticOutputinitbias,criticActivFunction,gradNormClipValue,normalizeEnv):
@@ -317,7 +317,7 @@ class BuildCriticModel ():
             
             with tf.name_scope("actionGradients"):
                 actionGradients_ = tf.gradients(Qevalvalue_, action_)[0]
-                
+                actionGradients_ = tf.gradients(Qevalvalue_, action_)[0]  if self.gradNormClipValue == None else [tf.clip_by_norm(grad, self.gradNormClipValue) for grad in tf.gradients(Qevalvalue_, action_)[0]]
                 tf.add_to_collection("actionGradients_", actionGradients_)
             
             with tf.name_scope("loss"):
@@ -338,9 +338,7 @@ class BuildCriticModel ():
             model = tf.Session(graph = graph)
             model.run(tf.global_variables_initializer())
             
-            criticWriter = tf.summary.FileWriter('/path/to/logs', graph = graph)
-            tf.add_to_collection("criticWriter", criticWriter)
-        return criticWriter, model
+        return model
     
 def getevalaction(actorModel, stateBatch):
     modelgraph = actorModel.graph
@@ -375,10 +373,9 @@ def getActionGradients(criticModel, stateBatch, actionsBatch):
     return actionGradients
 
 class TrainCritic:
-    def __init__(self, criticlearningRate, gamma,Writer):
+    def __init__(self, criticlearningRate, gamma):
         self.criticlearningRate = criticlearningRate
         self.gamma = gamma
-        self.Writer = Writer
     def __call__(self, actormodel,criticmodel, minibatch,batchSize):
         modelGraph = criticmodel.graph
         states_ = modelGraph.get_collection_ref("states_")[0]
@@ -408,13 +405,11 @@ class TrainCritic:
         
         summary = tf.Summary()
         summary.value.add(tag='reward', simple_value=float(np.mean(rewardbatch)))
-        self.Writer.flush()
         return criticmodel
     
 class TrainActor:
-    def __init__(self, actorLearningRate, actorWriter):
+    def __init__(self, actorLearningRate):
         self.actorLearningRate = actorLearningRate
-        self.actorWriter = actorWriter
 
     def __call__(self, actorModel ,criticModel, minibatch,batchSize):
         actorGraph = actorModel.graph
@@ -432,7 +427,6 @@ class TrainActor:
         trainOpt_ = actorGraph.get_collection_ref("trainOpt_")[0]
         actorModel.run([trainOpt_], feed_dict={states_: statebatch,actionGradients_: actionGradients,
                                                         learningRate_: self.actorLearningRate})
-        self.actorWriter.flush()
         return actorModel
 
 
