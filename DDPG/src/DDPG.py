@@ -61,13 +61,13 @@ class Agent:
         replaybuffer = deque(maxlen=self.fixedParameters['buffersize'])
         buildActorModel = BuildActorModel(stateDim, actionDim,actionBound ,
                                           self.fixedParameters['actorHiddenLayersWeightInit'],self.fixedParameters['actorHiddenLayersBiasInit'],
-                                          self.fixedParameters['actorOutputWeightInit'], self.fixedParameters['actorOutputBiasInit'],self.fixedParameters['actorActivFunction'])
+                                          self.fixedParameters['actorOutputWeightInit'], self.fixedParameters['actorOutputBiasInit'],self.fixedParameters['actorActivFunction'],self.fixedParameters['gradNormClipValue'])
         actorWriter, actorModel = buildActorModel(self.fixedParameters['actorHiddenLayersWidths'])
-    
+        
         buildCriticModel = BuildCriticModel(stateDim, actionDim,
                                             self.fixedParameters['criticHiddenLayersWeightInit'],self.fixedParameters['criticHiddenLayersBiasInit'],
                                             self.fixedParameters['criticOutputWeightInit'], self.fixedParameters['criticOutputBiasInit'],
-                                            self.fixedParameters['criticActivFunction'])
+                                            self.fixedParameters['criticActivFunction'],self.fixedParameters['gradNormClipValue'])
         criticWriter, criticModel = buildCriticModel(self.fixedParameters['criticHiddenLayersWidths'])
         
         trainCritic = TrainCritic(self.fixedParameters['criticlearningRate'], self.fixedParameters['gamma'], criticWriter)
@@ -131,7 +131,7 @@ class UpdateParameters:
     
 
 class BuildActorModel ():
-    def __init__(self, statedim, actiondim,actionbound,actorHiddenLayersInitinitweight,actorHiddenLayersinitbias,actorOutputInitinitweight,actorOutputinitbias,actorActivFunction):
+    def __init__(self, statedim, actiondim,actionbound,actorHiddenLayersInitinitweight,actorHiddenLayersinitbias,actorOutputInitinitweight,actorOutputinitbias,actorActivFunction,gradNormClipValue):
         self.stateDim = statedim
         self.actionDim = actiondim
         self.actionbound = actionbound
@@ -140,7 +140,7 @@ class BuildActorModel ():
         self.actorOutputInitinitweight = actorOutputInitinitweight
         self.actorOutputinitbias = actorOutputinitbias
         self.actorActivFunction = actorActivFunction
-        
+        self.gradNormClipValue = gradNormClipValue 
     def __call__(self, numberlayers):
         graph = tf.Graph()
         with graph.as_default():
@@ -199,7 +199,7 @@ class BuildActorModel ():
             with tf.variable_scope('Qaction'):
                 evalAction_ = tf.multiply(Qevalvalue_, self.actionbound, name='evalAction_')
                 targetAction_ = tf.multiply(Qnext, self.actionbound, name='targetAction_')
-                policyGradient_ = tf.gradients(evalAction_, evalParams_, actionGradients_)
+                policyGradient_ = tf.gradients(evalAction_, evalParams_, actionGradients_)  if self.gradNormClipValue == None else [tf.clip_by_norm(grad, self.gradNormClipValue) for grad in tf.gradients(evalAction_, evalParams_, actionGradients_) ]
                 tf.add_to_collection("evalAction_", evalAction_)
                 tf.add_to_collection("targetAction_", targetAction_)
                 tf.add_to_collection("policyGradient_", policyGradient_)
@@ -223,7 +223,7 @@ class BuildActorModel ():
         return actorWriter, model
 
 class BuildCriticModel ():
-    def __init__(self, statedim, actiondim,criticHiddenLayersInitinitweight,criticHiddenLayersinitbias,criticOutputInitinitweight,criticOutputinitbias,criticActivFunction):
+    def __init__(self, statedim, actiondim,criticHiddenLayersInitinitweight,criticHiddenLayersinitbias,criticOutputInitinitweight,criticOutputinitbias,criticActivFunction,gradNormClipValue):
         self.stateDim = statedim
         self.actionDim = actiondim
         self.criticHiddenLayersInitinitweight = criticHiddenLayersInitinitweight
@@ -231,6 +231,7 @@ class BuildCriticModel ():
         self.criticOutputInitinitweight = criticOutputInitinitweight
         self.criticOutputinitbias = criticOutputinitbias
         self.criticActivFunction = criticActivFunction
+        self.gradNormClipValue = gradNormClipValue
     def __call__(self, numberlayers):
         graph = tf.Graph()
         with graph.as_default():
@@ -312,6 +313,9 @@ class BuildCriticModel ():
             
             with tf.name_scope("actionGradients"):
                 actionGradients_ = tf.gradients(Qevalvalue_, action_)[0]
+                if self.gradNormClipValue == True:
+                    actionGradients_ = tf.clip_by_norm(actionGradients_, 1)
+                
                 tf.add_to_collection("actionGradients_", actionGradients_)
             
             with tf.name_scope("loss"):
