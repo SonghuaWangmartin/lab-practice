@@ -42,7 +42,7 @@ def ReplaceParameters(model):
 
 
 
-class Agent:
+class MartinDDPG:
     def __init__(self,fixedParameters):   
         self.fixedParameters = fixedParameters
         self.bufferfill = 0
@@ -58,32 +58,32 @@ class Agent:
         trajectory = []
         totalreward = []
         totalrewards = []
-        replaybuffer = deque(maxlen=self.fixedParameters['buffersize'])
+        replaybuffer = deque(maxlen=int(self.fixedParameters['bufferSize']))
         buildActorModel = BuildActorModel(stateDim, actionDim,actionBound ,
                                           self.fixedParameters['actorHiddenLayersWeightInit'],self.fixedParameters['actorHiddenLayersBiasInit'],
-                                          self.fixedParameters['actorOutputWeightInit'], self.fixedParameters['actorOutputBiasInit'],self.fixedParameters['actorActivFunction'],self.fixedParameters['gradNormClipValue'])
+                                          self.fixedParameters['actorOutputWeightInit'], self.fixedParameters['actorOutputBiasInit'],self.fixedParameters['actorActivFunction'],self.fixedParameters['gradNormClipValue'],self.fixedParameters['normalizeEnv'])
         actorWriter, actorModel = buildActorModel(self.fixedParameters['actorHiddenLayersWidths'])
         
         buildCriticModel = BuildCriticModel(stateDim, actionDim,
                                             self.fixedParameters['criticHiddenLayersWeightInit'],self.fixedParameters['criticHiddenLayersBiasInit'],
                                             self.fixedParameters['criticOutputWeightInit'], self.fixedParameters['criticOutputBiasInit'],
-                                            self.fixedParameters['criticActivFunction'],self.fixedParameters['gradNormClipValue'])
+                                            self.fixedParameters['criticActivFunction'],self.fixedParameters['gradNormClipValue'],self.fixedParameters['normalizeEnv'])
         criticWriter, criticModel = buildCriticModel(self.fixedParameters['criticHiddenLayersWidths'])
         
-        trainCritic = TrainCritic(self.fixedParameters['criticlearningRate'], self.fixedParameters['gamma'], criticWriter)
-        trainActor = TrainActor(self.fixedParameters['actorlearningRate'], actorWriter)
+        trainCritic = TrainCritic(self.fixedParameters['criticLR'], self.fixedParameters['gamma'], criticWriter)
+        trainActor = TrainActor(self.fixedParameters['actorLR'], actorWriter)
         updateParameters = UpdateParameters(self.fixedParameters['tau'])
         trainddpgModels = TrainDDPGModels(updateParameters, trainActor, trainCritic, actorModel,criticModel)
     
-        getnoise = GetNoise(self.fixedParameters['varianceDiscount'],self.fixedParameters['minVar'],self.fixedParameters['noiseDecayStartStep'],self.fixedParameters['initnoisevar'])
+        getnoise = GetNoise(self.fixedParameters['varianceDiscount'],self.fixedParameters['minVar'],self.fixedParameters['noiseDecayStartStep'],self.fixedParameters['noiseInitVariance'])
         getnoiseaction = GetNoiseAction(actorModel,actionLow, actionHigh)
-        learn = Learn(self.fixedParameters['buffersize'],self.fixedParameters['minibatchSize'],trainddpgModels)
+        learn = Learn(self.fixedParameters['bufferSize'],self.fixedParameters['minibatchSize'],trainddpgModels)
         actorModel= ReplaceParameters(actorModel)
         criticModel= ReplaceParameters(criticModel)
         state  = env.reset()
-        replaybuffer = fillbuffer(self.fixedParameters['initbuffer'],self.bufferfill,env,replaybuffer,state)
+        replaybuffer = fillbuffer(3000,self.bufferfill,env,replaybuffer,state)
         
-        for episode in range(1,self.fixedParameters['EPISODE']+1):
+        for episode in range(1,self.fixedParameters['maxEpisode']+1):
             state  = env.reset()
             rewards = 0
             for j in range(self.fixedParameters['maxTimeStep']):
@@ -104,16 +104,14 @@ class Agent:
                 meanreward.append(np.mean(totalreward))
                 print('episode: ',episode,'meanreward:',np.mean(totalreward))
                 self.totalreward = []
-        episodes = 100*(np.arange(len(meanreward)))
 
         with actorModel.as_default():
             saveVariables(actorModel, self.fixedParameters['modelSavePathMartin'])
         with criticModel.as_default():
             saveVariables(criticModel, self.fixedParameters['modelSavePathMartin'])
         saveToPickle(meanreward, self.fixedParameters['rewardSavePathMartin'])
-        plt.plot(episodes,meanreward)
-        plt.xlabel('episode')
-        plt.ylabel('rewards')
+        
+        return meanreward
         
 
 
@@ -131,7 +129,7 @@ class UpdateParameters:
     
 
 class BuildActorModel ():
-    def __init__(self, statedim, actiondim,actionbound,actorHiddenLayersInitinitweight,actorHiddenLayersinitbias,actorOutputInitinitweight,actorOutputinitbias,actorActivFunction,gradNormClipValue):
+    def __init__(self, statedim, actiondim,actionbound,actorHiddenLayersInitinitweight,actorHiddenLayersinitbias,actorOutputInitinitweight,actorOutputinitbias,actorActivFunction,gradNormClipValue,normalizeEnv):
         self.stateDim = statedim
         self.actionDim = actiondim
         self.actionbound = actionbound
@@ -141,6 +139,7 @@ class BuildActorModel ():
         self.actorOutputinitbias = actorOutputinitbias
         self.actorActivFunction = actorActivFunction
         self.gradNormClipValue = gradNormClipValue 
+        self.normalizeEnv = normalizeEnv 
     def __call__(self, numberlayers):
         graph = tf.Graph()
         with graph.as_default():
@@ -166,7 +165,8 @@ class BuildActorModel ():
                     actorhiddenActivFunction = self.actorActivFunction[unit]
                     activation_ = tf.layers.dense(activation_, units = numberlayers[unit], kernel_initializer=self.actorHiddenLayersInitinitweight[unit],activation = actorhiddenActivFunction, 
                                          bias_initializer=self.actorHiddenLayersinitbias[unit], name="hidden" + str(unit + 1),trainable = True)
-                    activation_ = tf.layers.batch_normalization(activation_)
+                    if self.normalizeEnv == True:
+                        activation_ = tf.layers.batch_normalization(activation_)
                 actoroutputActivFunction = self.actorActivFunction[-1]
                 Qevalvalue_ = tf.layers.dense(activation_, self.actionDim,actoroutputActivFunction, kernel_initializer=self.actorOutputInitinitweight,
                                       bias_initializer=self.actorOutputinitbias, name='e2',trainable = True)
@@ -179,7 +179,8 @@ class BuildActorModel ():
                     actorhiddenActivFunction = self.actorActivFunction[unit]
                     activation_ = tf.layers.dense(activation_, units = numberlayers[unit], kernel_initializer=self.actorHiddenLayersInitinitweight[unit],activation = actorhiddenActivFunction, 
                                          bias_initializer=self.actorHiddenLayersinitbias[unit], name="hidden" + str(unit + 1),trainable = False)
-                    activation_ = tf.layers.batch_normalization(activation_)
+                    if self.normalizeEnv == True:
+                        activation_ = tf.layers.batch_normalization(activation_)
                 actoroutputActivFunction = self.actorActivFunction[-1]
                 Qnext = tf.layers.dense(activation_, self.actionDim, actoroutputActivFunction,kernel_initializer=self.actorOutputInitinitweight,
                                       bias_initializer=self.actorOutputinitbias, name='t2',trainable = False)
@@ -223,7 +224,7 @@ class BuildActorModel ():
         return actorWriter, model
 
 class BuildCriticModel ():
-    def __init__(self, statedim, actiondim,criticHiddenLayersInitinitweight,criticHiddenLayersinitbias,criticOutputInitinitweight,criticOutputinitbias,criticActivFunction,gradNormClipValue):
+    def __init__(self, statedim, actiondim,criticHiddenLayersInitinitweight,criticHiddenLayersinitbias,criticOutputInitinitweight,criticOutputinitbias,criticActivFunction,gradNormClipValue,normalizeEnv):
         self.stateDim = statedim
         self.actionDim = actiondim
         self.criticHiddenLayersInitinitweight = criticHiddenLayersInitinitweight
@@ -232,6 +233,7 @@ class BuildCriticModel ():
         self.criticOutputinitbias = criticOutputinitbias
         self.criticActivFunction = criticActivFunction
         self.gradNormClipValue = gradNormClipValue
+        self.normalizeEnv = normalizeEnv
     def __call__(self, numberlayers):
         graph = tf.Graph()
         with graph.as_default():
@@ -264,9 +266,10 @@ class BuildCriticModel ():
                     critichiddenActivFunction = self.criticActivFunction[unit]
                     activation_ = tf.layers.dense(activation_, units = numberlayers[unit], kernel_initializer=self.criticHiddenLayersInitinitweight[unit],activation = critichiddenActivFunction, 
                                          bias_initializer=self.criticHiddenLayersinitbias[unit], name="hidden" + str(unit + 1),trainable = True)
-                    activation_ = tf.layers.batch_normalization(activation_)
+                    if self.normalizeEnv == True:
+                        activation_ = tf.layers.batch_normalization(activation_)
                 criticoutputActivFunction = self.criticActivFunction[-2]
-                secondnumlayers = numberlayers[-2] if len(numberlayers) >= 2 else self.stateDim
+                secondnumlayers = numberlayers[-2] if len(numberlayers) >= 2 else numberlayers[-1]
                 evalstateweight_ = tf.get_variable('evalstateweight_', [secondnumlayers, numberlayers[-1]])
                 evalactionweight_ = tf.get_variable('evalactionweight_', [self.actionDim, numberlayers[-1]])
                 evalbias1 = tf.get_variable(name='evalbias1', shape=[numberlayers[-1]], initializer=self.criticHiddenLayersinitbias[-1])
@@ -285,9 +288,10 @@ class BuildCriticModel ():
                     critichiddenActivFunction = self.criticActivFunction[unit]
                     activation_ = tf.layers.dense(activation_, units = numberlayers[unit], kernel_initializer=self.criticHiddenLayersInitinitweight[unit],activation = critichiddenActivFunction, 
                                          bias_initializer=self.criticHiddenLayersinitbias[unit], name="hidden" + str(unit + 1),trainable = True)
-                    activation_ = tf.layers.batch_normalization(activation_)
+                    if self.normalizeEnv == True:
+                        activation_ = tf.layers.batch_normalization(activation_)
                 criticoutputActivFunction = self.criticActivFunction[-2]
-                secondnumlayers = numberlayers[-2] if len(numberlayers) >= 2 else self.stateDim
+                secondnumlayers = numberlayers[-2] if len(numberlayers) >= 2 else numberlayers[-1]
                 targetstateweight_ = tf.get_variable('targetstateweight_', [secondnumlayers, numberlayers[-1]])
                 targetactionweight_ = tf.get_variable('targetactionweight_', [self.actionDim, numberlayers[-1]])
                 targetbias1 = tf.get_variable(name='targetbias1', shape=[numberlayers[-1]], initializer=self.criticHiddenLayersinitbias[-1])
@@ -313,8 +317,6 @@ class BuildCriticModel ():
             
             with tf.name_scope("actionGradients"):
                 actionGradients_ = tf.gradients(Qevalvalue_, action_)[0]
-                if self.gradNormClipValue == True:
-                    actionGradients_ = tf.clip_by_norm(actionGradients_, 1)
                 
                 tf.add_to_collection("actionGradients_", actionGradients_)
             
