@@ -1,4 +1,4 @@
-"""
+ang"""
 Created on Tue Jun 16 06:25:29 2020
 
 @author: martin
@@ -113,7 +113,7 @@ class MartinDDPG:
             saveVariables(criticModel, self.fixedParameters['modelSavePathMartin'])
         saveToPickle(meanreward, self.fixedParameters['rewardSavePathMartin'])
         
-        return meanreward
+        return episodereward
         
 
 
